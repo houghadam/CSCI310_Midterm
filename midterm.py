@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 
+"""
+Filename: midterm.py
+
+Description: A program to rename and organize files, modifiy creation date of files,
+and optionally schedule processing via cron.
+
+Authors: Adam Hough, Md Mahmudul Islam, Prakriti Thapa
+"""
+
 import datetime
 import os
 import platform
 import random
 import subprocess
 import sys
+import time
 
 # Check the current OS (some functions are OS dependent)
 system = platform.system()
+
+global_count = 100
 
 
 def list_directories(root_dir: str):
@@ -54,7 +66,13 @@ def rename_file(path: str, name: str, extension: str):
         # Concatenate the folder path until reaching the filename
         folder += split_path[i] + "/"
     # Call Bash command to rename file
-    os.system(f"mv {path} {folder}{name}.{extension}")
+    file_exists = subprocess.getoutput(
+        f"test -e {folder}{name}.{extension} && echo true || echo false"
+    )
+    if file_exists == "true":
+        os.system(f"mv -n {path} {folder}{name}{name}.{extension}")
+    else:
+        os.system(f"mv -n {path} {folder}{name}.{extension}")
 
 
 def move_file_up_one_level(path: str):
@@ -63,6 +81,7 @@ def move_file_up_one_level(path: str):
     Input: path to file
     Return: none
     """
+    global global_count
     split_path = path.split("/")
     new_directory = ""
     current_dir = len(split_path) - 2
@@ -72,7 +91,15 @@ def move_file_up_one_level(path: str):
             new_directory += split_path[i] + "/"
         elif i != current_dir:
             new_directory += split_path[i]
-    os.system(f"mv -n {path} {new_directory}")
+    file_exists = subprocess.getoutput(
+        f"test -e {new_directory} && echo true || echo false"
+    )
+    if file_exists == "true":
+        new_path = new_directory.split(".")
+        os.system(f"mv -n {path} {new_path[0]}{global_count}.{new_path[1]}")
+        global_count += 1
+    else:
+        os.system(f"mv -n {path} {new_directory}")
 
 
 def display_timestamp(file: str):
@@ -85,7 +112,7 @@ def display_timestamp(file: str):
     system = platform.system()
     fmt = "awk '{print strftime(\"%Y-%m-%d %H:%M:%S\")}'"
     if system == "Linux":
-        return subprocess.getoutput(f"stat -c %W {file} | {fmt}")
+        return subprocess.getoutput(f"stat -c %Y {file} | {fmt}")
     if system == "Darwin":
         return subprocess.getoutput(f'stat -f "%SB" -t "%Y-%m-%d %H:%M:%S" {file}')
 
@@ -109,7 +136,7 @@ def remove_empty_directories(root_dir: str):
         # If the output is empty
         if output == "":
             # Remove the directory
-            os.system(f"rm -df {dir}")
+            os.system(f"rm -rf {dir}")
 
 
 def backdate_system_date():
@@ -120,14 +147,18 @@ def backdate_system_date():
     """
     i = random.randrange(1, 10, 1)
     if system == "Linux":
-        os.system("sudo timedatectl set-ntp 0")
-        os.system(f"sudo date -s '{i} days ago")
+        os.system("timedatectl set-ntp 0")
+        now = datetime.datetime.now()
+        now = datetime.datetime.timetuple(now)
+        os.system(
+            f'sudo date -s "{now.tm_year}-{now.tm_mon:02}-{(now.tm_mday - i):02} {now.tm_hour:02}:{now.tm_min:02}:{now.tm_sec:02}"'
+        )
     if system == "Darwin":
         now = datetime.datetime.now()
         now = datetime.datetime.timetuple(now)
-        os.system("sudo systemsetup -setusingnetworktime off")
+        os.system("sudo systemsetup -setusingnetworktime off 2> /dev/null")
         os.system(
-            f"sudo date {now.tm_mon}{now.tm_mday - i}{now.tm_hour}{now.tm_min}{now.tm_year}"
+            f"sudo date {now.tm_mon:02}{(now.tm_mday - i):02}{now.tm_hour:02}{now.tm_min:02}{now.tm_year}"
         )
 
 
@@ -138,9 +169,9 @@ def reset_system_date():
     Return: none
     """
     if system == "Linux":
-        os.system("sudo timedatectl set-ntp 1")
+        os.system("timedatectl set-ntp 1")
     if system == "Darwin":
-        os.system("sudo systemsetup -setusingnetworktime on")
+        os.system("sudo systemsetup -setusingnetworktime on 2> /dev/null")
 
 
 def change_creation_datetime(file: str):
@@ -149,6 +180,14 @@ def change_creation_datetime(file: str):
     Input: file to update
     Return: none
     """
+    if system == "Linux":
+        i = random.randrange(1, 10, 1)
+        now = datetime.datetime.now()
+        now = datetime.datetime.timetuple(now)
+        dts = f"{now.tm_year}-{now.tm_mon:02}-{(now.tm_mday - i):02} {now.tm_hour:02}:{now.tm_min:02}:{now.tm_sec:02}"
+        dt = datetime.datetime.strptime(dts, "%Y-%m-%d %H:%M:%S")
+        timestamp = dt.timestamp()
+        os.utime(file, (timestamp, timestamp))
     os.system(f"cp {file} {file}.backup")
     os.system(f"rm {file}")
     os.system(f"cp {file}.backup {file}")
@@ -161,21 +200,13 @@ def schedule_program():
     Input: none
     Return: none
     """
-    # Get the current user
-    username = subprocess.getoutput("whoami")
-    username = username.replace(" ", "\ ")
     # Get filepath for this script
     file_path = os.path.realpath(__file__)
-    # Create path to venv (assumes venv created in conventional location)
     split_path = file_path.split("/")
-    venv_path = ""
     log_path = ""
     for i in range(len(split_path) - 1):
-        venv_path += split_path[i] + "/"
         log_path += split_path[i] + "/"
-    venv_path += "venv/bin/python"
     log_path += "log.txt"
-    venv_path = venv_path.replace(" ", "\ ")
     file_path = file_path.replace(" ", "\ ")
     log_path = log_path.replace(" ", "\ ")
 
@@ -185,40 +216,37 @@ def schedule_program():
     )
     # Check crontab file to see if program is already scheduled
     cron = subprocess.getoutput("crontab -l")
-    # Set the correct path for the crontab based on OS
-    cron_path = ""
-    if system == "Linux":
-        cron_path = f"/var/spool/cron/crontabs/{username}"
-    if system == "Darwin":
-        cron_path = f"/usr/lib/cron/tabs/{username}"
 
-    if freq == "1" and cron.find("midterm.py") == -1:
+    if freq == "1" and (cron.find("midterm.py") == -1 or cron.find("0 0 * * 0") == -1):
         # Schedule the script to run once per week at midnight on Sunday
         subprocess.run(
-            f'echo "0 0 * * 0 {venv_path} {file_path} CRON >> {log_path}" | sudo tee -a {cron_path} > /dev/null',
+            f'(crontab -l ; echo "0 0 * * 0  /usr/bin/python3 {file_path} CRON >> {log_path} 2>&1") | crontab -',
             shell=True,
         )
-    elif freq == "1" and cron.find("midterm.py") > 0:
+    elif freq == "1":
         print("Already scheduled at this frequency")
 
     if freq == "2" and (cron.find("midterm.py") == -1 or cron.find("* * * * *") == -1):
         # Max cron frequency is every minute, so we need to create two entries
         # and offset them by 30 seconds to make it run more frequently
         subprocess.run(
-            f'echo "* * * * * {file_path} CRON >> {log_path} 2>&1" | sudo tee -a {cron_path} > /dev/null',
+            f'(crontab -l ; echo "* * * * * /usr/bin/python3 {file_path} CRON >> {log_path}") | crontab -',
             shell=True,
         )
         subprocess.run(
-            f'echo "* * * * * (sleep 30 ; {file_path} CRON >> {log_path} 2>&1)" | sudo tee -a {cron_path} > /dev/null',
+            f'(crontab -l ; echo "* * * * * (sleep 30 ; /usr/bin/python3 {file_path} CRON >> {log_path})") | crontab -',
             shell=True,
         )
+    elif freq == "2":
+        print("Already scheduled at this frequency")
 
 
-def main():
-    # Generate a list of subdirectories
-    dirs = list_directories("data")
+def main(file_path: str):
+    # List directories, files, and creation timestamp - move files to parent directory
+    dirs = [file_path]
+    dirs.extend(list_directories(file_path))
+    print(dirs)
     for dir in dirs:
-        print(dir)
         # Get a list of files in the current directory
         files = list_files(dir)
         # If the list is not empty
@@ -229,12 +257,13 @@ def main():
                 move_file_up_one_level(file)
 
     # Remove any empty directories left after moving files
-    remove_empty_directories("data")
+    remove_empty_directories(file_path)
 
     # Get a new listing of directories
-    dirs = list_directories("data")
+    dirs = [file_path]
+    dirs.extend(list_directories(file_path))
     for dir in dirs:
-        # Get a list fo files in the current directory
+        # Get a list of files in the current directory
         files = list_files(dir)
         # If the list if not empty
         if files != []:
@@ -243,10 +272,11 @@ def main():
                 rename_file(file, index + 1, "csv")
 
     # Get a new listing of directories
-    dirs = list_directories("data")
+    dirs = [file_path]
+    dirs.extend(list_directories(file_path))
     backdate_system_date()
     for dir in dirs:
-        # Get a list fo files in the current directory
+        # Get a list of files in the current directory
         files = list_files(dir)
         # If the list if not empty
         if files != []:
@@ -256,9 +286,9 @@ def main():
     reset_system_date()
 
     # Generate a list of subdirectories
-    dirs = list_directories("data")
+    dirs = [file_path]
+    dirs.extend(list_directories(file_path))
     for dir in dirs:
-        print(dir)
         # Get a list of files in the current directory
         files = list_files(dir)
         # If the list is not empty
@@ -269,9 +299,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    # if len(sys.argv) <= 1 or sys.argv[1] != "CRON":
-    #     schedule_program()
-    # else:
-    #     with open("log.txt", "a") as log:
-    #         log.write(f"Ran via cron on {datetime.datetime.now()}\n")
+    if len(sys.argv) > 1 and sys.argv[1] == "CRON":
+        print(f"Ran on {datetime.datetime.now()} via cron")
+    else:
+        schedule_program()
+    main("data")
